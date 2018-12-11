@@ -1,6 +1,6 @@
 import socket
 from fib import fib
-
+from threading import Thread
 
 def fib_server(address):
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -11,7 +11,7 @@ def fib_server(address):
     while True:
         client, addr = sock.accept()
         print('Connection from {}'.format(addr))
-        fib_handler(client)
+        Thread(target=fib_handler, args=(client,)).start()
 
 
 def fib_handler(client):
