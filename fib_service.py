@@ -1,6 +1,16 @@
+# this version of the server uses concurrent.futures
+# to off load works to a pool, running a heavy load task
+# e.g. nc localhost 25000 -> 40, no longer significantly
+# drops the performance of quick tasks.
+
 import socket
 from fib import fib
 from threading import Thread
+from concurrent.futures import ProcessPoolExecutor as Pool
+
+
+pool = Pool(4)
+
 
 def fib_server(address):
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -21,7 +31,9 @@ def fib_handler(client):
             break
 
         n = int(req)
-        result = fib(n)
+        future = pool.submit(fib, n)
+        result = future.result()
+
         resp = str(result).encode('ascii') + b'\n'
         client.send(resp)
 
