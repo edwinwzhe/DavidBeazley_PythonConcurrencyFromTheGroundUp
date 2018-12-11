@@ -1,16 +1,39 @@
-# this version of the server uses concurrent.futures
-# to off load works to a pool, running a heavy load task
-# e.g. nc localhost 25000 -> 40, no longer significantly
-# drops the performance of quick tasks.
 
 import socket
 from fib import fib
-from threading import Thread
-from concurrent.futures import ProcessPoolExecutor as Pool
+from collections import deque
+from select import select
+
+tasks = deque()
+recv_wait = {}  # mapping sockets -> tasks (generators)
+send_wait = {}
 
 
-pool = Pool(4)
+def run():
+    while any([tasks, recv_wait, send_wait]):
+        while not tasks:
+            # No active tasks to run
+            # wait for I/O
+            can_recv, can_send, [] = select(recv_wait, send_wait, [])
 
+            for s in can_recv:
+                tasks.append(recv_wait.pop(s))
+
+            for s in can_send:
+                tasks.append(send_wait.pop(s))
+
+        task = tasks.popleft()
+        try:
+            why, what = next(task)  # run to the yield
+            if why == 'recv':
+                recv_wait[what] = task
+            elif why == 'send':
+                send_wait[what] = task
+            else:
+                raise RuntimeError("ARG!")
+
+        except StopIteration:
+            print('task done')
 
 def fib_server(address):
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -19,27 +42,30 @@ def fib_server(address):
     sock.listen(5)
 
     while True:
-        client, addr = sock.accept()
+        yield 'recv', sock
+        client, addr = sock.accept()  # blocking
         print('Connection from {}'.format(addr))
-        Thread(target=fib_handler, args=(client,)).start()
+        tasks.append(fib_handler(client))
 
 
 def fib_handler(client):
     while True:
-        req = client.recv(100)
+        yield 'recv', client
+        req = client.recv(100)  # blocking
         if not req:
             break
 
         n = int(req)
-        future = pool.submit(fib, n)
-        result = future.result()
+        result = fib(n)
 
         resp = str(result).encode('ascii') + b'\n'
+
+        yield 'send', client
         client.send(resp)
 
     print('Closed')
 
 
-fib_server(('', 25000))
-
+tasks.append(fib_server(('', 25000)))
+run()
 
